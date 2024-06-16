@@ -191,13 +191,51 @@ class ComfyApi extends EventTarget {
 	}
 
 	/**
+	 * Loads work flow by file name
+	 * @returns The work flow
+	 */
+	async getWorkflow(fileName) {
+		const resp = await this.fetchApi("/workflow?filename="+fileName, { cache: "no-store"});
+		return await resp.json();
+	}
+
+	/**
+	 * Saves a workflow to the server
+	 * @param {string} fileName The name of the file to save
+	 * @param {object} workflow The workflow data to save
+	 * @returns The response from the server
+	 **/
+	async saveWorkflow(fileName, workflow) {
+		const body = {
+			filename: fileName,
+			workflow: workflow
+		};
+		const res = await this.fetchApi("/save", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+		});
+
+		if (res.status !== 200) {
+			throw {
+				response: await res.json(),
+			};
+		}
+		console.log("Saved workflow", res);
+		return await res.json();
+	}
+
+	/**
 	 *
 	 * @param {number} number The index at which to queue the prompt, passing -1 will insert the prompt at the front of the queue
 	 * @param {object} prompt The prompt data to queue
 	 */
-	async queuePrompt(number, { output, workflow }) {
+	async queuePrompt(number, { output, workflow }, flowname) {
 		const body = {
 			client_id: this.clientId,
+			flowname: flowname,
 			prompt: output,
 			extra_data: { extra_pnginfo: { workflow } },
 		};

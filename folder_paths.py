@@ -38,7 +38,7 @@ output_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "ou
 temp_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp")
 input_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "input")
 user_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "user")
-
+workflow_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "workflow")
 filename_list_cache = {}
 
 if not os.path.exists(input_directory):
@@ -46,6 +46,12 @@ if not os.path.exists(input_directory):
         os.makedirs(input_directory)
     except:
         logging.error("Failed to create input directory")
+    
+if not os.path.exists(workflow_directory):
+    try:
+        os.makedirs(workflow_directory)
+    except:
+        logging.error("Failed to create work_flow directory")
 
 def set_output_directory(output_dir):
     global output_directory
@@ -71,6 +77,10 @@ def get_input_directory():
     global input_directory
     return input_directory
 
+def get_workflow_directory():
+    global workflow_directory
+    return workflow_directory
+
 
 #NOTE: used in http server so don't put folders that should not be accessed remotely
 def get_directory_by_type(type_name):
@@ -80,6 +90,8 @@ def get_directory_by_type(type_name):
         return get_temp_directory()
     if type_name == "input":
         return get_input_directory()
+    if type_name == "workflow":
+        return get_workflow_directory()
     return None
 
 

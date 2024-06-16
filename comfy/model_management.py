@@ -74,6 +74,7 @@ def is_intel_xpu():
 def get_torch_device():
     global directml_enabled
     global cpu_state
+    return torch.device("cpu")
     if directml_enabled:
         global directml_device
         return directml_device

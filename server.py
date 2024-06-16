@@ -126,6 +126,23 @@ class PromptServer():
         def get_embeddings(self):
             embeddings = folder_paths.get_filename_list("embeddings")
             return web.json_response(list(map(lambda a: os.path.splitext(a)[0], embeddings)))
+        
+        @routes.get("/workflows")
+        def get_workflows(self):
+            flow_folder = folder_paths.get_workflow_directory()
+            # Get all files in the workflow folder
+            files = glob.glob(os.path.join(flow_folder, '*.json'))
+            return web.json_response(list(map(lambda a: os.path.splitext(a)[0], files)))
+
+        @routes.get("/workflow")
+        async def get_workflow(request):
+            if "filename" in request.rel_url.query:
+                filename = request.rel_url.query["filename"]
+                file = os.path.join(folder_paths.get_workflow_directory(), filename + ".json")
+                if os.path.isfile(file):
+                    with open(file, "r", encoding='utf-8') as f:
+                        return web.json_response(json.loads(f.read()))
+            return web.Response(status=404)
 
         @routes.get("/extensions")
         async def get_extensions(request):
@@ -151,6 +168,8 @@ class PromptServer():
                 type_dir = folder_paths.get_temp_directory()
             elif dir_type == "output":
                 type_dir = folder_paths.get_output_directory()
+            elif dir_type == "workflow":
+                type_dir = folder_paths.get_workflow_directory()
 
             return type_dir, dir_type
 
@@ -446,12 +465,35 @@ class PromptServer():
             queue_info['queue_pending'] = current_queue[1]
             return web.json_response(queue_info)
 
+        def save_workflow(filename, data):
+            if not filename.endswith(".json"):
+                filename += ".json"
+            file_path = os.path.join(folder_paths.get_workflow_directory(), filename)
+            with open(file_path, "w", encoding='utf-8') as f:
+                f.write(json.dumps(data))
+            return True
+
+        @routes.post("/save")
+        async def post_save(request):
+            json_data = await request.json()
+            if "filename" in json_data and "workflow" in json_data:
+                filename = json_data["filename"]
+                data = json_data["workflow"]
+                workflow = json.loads(data)
+                save_workflow(filename, workflow)
+                return web.Response(status=200)
+            return web.Response(status=400)
+
         @routes.post("/prompt")
         async def post_prompt(request):
             logging.info("got prompt")
             resp_code = 200
             out_string = ""
             json_data =  await request.json()
+            if "flowname" not in json_data:
+                response = {"prompt_id": prompt_id, "number": number, "node_errors": "no flowname specified"}
+                return web.json_response(response)
+            flowname = json_data["flowname"]
             json_data = self.trigger_on_prompt(json_data)
 
             if "number" in json_data:
@@ -476,6 +518,11 @@ class PromptServer():
                 if valid[0]:
                     prompt_id = str(uuid.uuid4())
                     outputs_to_execute = valid[2]
+                    pnginfo = extra_data.get("extra_pnginfo", None)
+                    if pnginfo is not None:
+                        workflow = pnginfo.get("workflow", None)
+                        if workflow is not None:
+                            save_workflow(flowname, workflow)
                     self.prompt_queue.put((number, prompt_id, prompt, extra_data, outputs_to_execute))
                     response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}
                     return web.json_response(response)

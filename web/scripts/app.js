@@ -6,7 +6,7 @@ import { defaultGraph } from "./defaultGraph.js";
 import { getPngMetadata, getWebpMetadata, importA1111, getLatentMetadata } from "./pnginfo.js";
 import { addDomClippingSetting } from "./domWidget.js";
 import { createImageHost, calculateImageGrid } from "./ui/imagePreview.js"
-
+import { get_flowname_from_url } from "./utils.js"
 export const ANIM_PREVIEW_WIDGET = "$$comfy_animation_preview"
 
 function sanitizeNodeName(string) {
@@ -1578,9 +1578,14 @@ export class ComfyApp {
 				}
 			};
 			const clientId = api.initialClientId ?? api.clientId;
-			restored =
-				(clientId && (await loadWorkflow(sessionStorage.getItem(`workflow:${clientId}`)))) ||
-				(await loadWorkflow(localStorage.getItem("workflow")));
+			const filename = get_flowname_from_url();
+			const workflow = await api.getWorkflow(filename);
+			console.log("get workflow", workflow);
+			await this.loadGraphData(workflow);
+			restored = true;
+			// restored =
+			// 	(clientId && (await loadWorkflow(sessionStorage.getItem(`workflow:${clientId}`)))) ||
+			// 	(await loadWorkflow(localStorage.getItem("workflow")));
 		} catch (err) {
 			console.error("Error loading previous workflow", err);
 		}
@@ -2101,6 +2106,7 @@ export class ComfyApp {
 	}
 
 	async queuePrompt(number, batchCount = 1) {
+		const flowname = get_flowname_from_url();
 		this.#queueItems.push({ number, batchCount });
 
 		// Only have one action process the items so each one gets a unique seed correctly
@@ -2119,7 +2125,7 @@ export class ComfyApp {
 					const p = await this.graphToPrompt();
 
 					try {
-						const res = await api.queuePrompt(number, p);
+						const res = await api.queuePrompt(number, p, flowname);
 						this.lastNodeErrors = res.node_errors;
 						if (this.lastNodeErrors.length > 0) {
 							this.canvas.draw(true, true);

@@ -2,6 +2,7 @@ import { api } from "./api.js";
 import { ComfyDialog as _ComfyDialog } from "./ui/dialog.js";
 import { toggleSwitch } from "./ui/toggleSwitch.js";
 import { ComfySettingsDialog } from "./ui/settings.js";
+import { get_flowname_from_url } from "./utils.js";
 
 export const ComfyDialog = _ComfyDialog;
 
@@ -254,6 +255,7 @@ class ComfyList {
 					},
 				}),
 				$el("button", {textContent: "Refresh", onclick: () => this.load()}),
+				
 			])
 		);
 	}
@@ -525,10 +527,21 @@ export class ComfyUI {
 			this.queue.element,
 			this.history.element,
 			$el("button", {
+				id: "comfy-save-server-button", textContent: "Save", onclick: () => {
+					app.graphToPrompt().then(p=>{
+						const json = JSON.stringify(p.workflow, null, 2); // convert the data to a JSON string
+						const filename = get_flowname_from_url();
+						const res = api.saveWorkflow(filename,json)
+						console.log("save to server succeed",res)
+					});
+					
+				}
+			}),
+			$el("button", {
 				id: "comfy-save-button",
-				textContent: "Save",
+				textContent: "Export",
 				onclick: () => {
-					let filename = "workflow.json";
+					let filename = get_flowname_from_url() || "workflow.json";
 					if (promptFilename.value) {
 						filename = prompt("Save workflow as:", filename);
 						if (!filename) return;
@@ -590,6 +603,19 @@ export class ComfyUI {
 				id: "comfy-refresh-button",
 				textContent: "Refresh",
 				onclick: () => app.refreshComboInNodes()
+			}),
+			$el("button", {
+				id: "comfy-new-button", textContent: "New", onclick: () => {
+					app.graphToPrompt().then(p=>{
+						const json = JSON.stringify(p.workflow, null, 2); // convert the data to a JSON string
+						const filename = get_flowname_from_url();
+						api.saveWorkflow(filename,json)
+					});
+					location.hash = "";
+					const filename = get_flowname_from_url();
+					app.clean();
+					app.graph.clear();
+				}
 			}),
 			$el("button", {id: "comfy-clipspace-button", textContent: "Clipspace", onclick: () => app.openClipspace()}),
 			$el("button", {

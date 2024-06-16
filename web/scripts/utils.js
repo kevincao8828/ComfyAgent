@@ -86,3 +86,26 @@ export async function addStylesheet(urlOrFile, relativeTo) {
 		});
 	});
 }
+
+export function get_flowname_from_url() {
+	// 获取当前URL中的锚点字符串
+var hash = location.hash;
+if (hash === "") {
+    // 使用循环确保用户输入内容
+    while (hash === "" || hash === null) {
+        hash = prompt("Please enter workflow name (this field is required):");
+        // 如果用户输入了内容，跳出循环
+        if (hash !== null && hash !== "") {
+            break;
+        }
+        // 如果用户点击了取消或者没有输入内容，循环会继续，再次弹出prompt
+    }
+    // 用户输入了有效内容，更新location.hash
+    if (hash !== null) {
+        location.hash = hash;
+    }
+} else {
+    hash = hash.substring(1);
+}
+return hash;
+}
