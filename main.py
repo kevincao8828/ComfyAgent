@@ -79,6 +79,13 @@ from server import BinaryEventTypes
 from nodes import init_custom_nodes
 import comfy.model_management
 
+# Import multi-GPU support if available
+try:
+    import multi_gpu
+    MULTI_GPU_AVAILABLE = True
+except ImportError:
+    MULTI_GPU_AVAILABLE = False
+
 def cuda_malloc_warning():
     device = comfy.model_management.get_torch_device()
     device_name = comfy.model_management.get_torch_device_name(device)
@@ -204,9 +211,24 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     server = server.PromptServer(loop)
-    q = execution.PromptQueue(server)
+    
+    # Check if multi-GPU mode is enabled
+    if MULTI_GPU_AVAILABLE and args.multi_gpu is not None:
+        # Parse GPU IDs from the argument
+        gpu_ids = multi_gpu.parse_gpu_ids(args.multi_gpu)
+        if len(gpu_ids) > 0:
+            logging.info(f"Enabling multi-GPU mode with GPUs: {gpu_ids}")
+            # Create a multi-GPU prompt queue
+            q = multi_gpu.MultiGPUPromptQueue(server, gpu_ids)
+        else:
+            logging.warning("Invalid GPU IDs for multi-GPU mode, falling back to single GPU mode")
+            q = execution.PromptQueue(server)
+    else:
+        # Standard single-GPU queue
+        q = execution.PromptQueue(server)
 
     extra_model_paths_config_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "extra_model_paths.yaml")
+
     if os.path.isfile(extra_model_paths_config_path):
         load_extra_path_config(extra_model_paths_config_path)
 
@@ -221,7 +243,10 @@ if __name__ == "__main__":
     server.add_routes()
     hijack_progress(server)
 
-    threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
+    # Only start the prompt worker thread for single-GPU mode
+    # Multi-GPU mode handles this in its own worker processes
+    if not (MULTI_GPU_AVAILABLE and args.multi_gpu is not None):
+        threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
 
     if args.output_directory:
         output_dir = os.path.abspath(args.output_directory)
@@ -254,5 +279,10 @@ if __name__ == "__main__":
         loop.run_until_complete(run(server, address=args.listen, port=args.port, verbose=not args.dont_print_server, call_on_start=call_on_start))
     except KeyboardInterrupt:
         logging.info("\nStopped server")
+    
+    # Shutdown multi-GPU workers if active
+    if MULTI_GPU_AVAILABLE and args.multi_gpu is not None and hasattr(q, 'shutdown'):
+        logging.info("Shutting down multi-GPU workers...")
+        q.shutdown()
 
     cleanup_temp()
