@@ -759,6 +759,18 @@ class PromptQueue:
             self.task_counter += 1
             self.server.queue_updated()
             return (item, i)
+    
+    def get_next_item(self):
+        """Get the next item from the queue without blocking"""
+        with self.mutex:
+            if len(self.queue) == 0:
+                return None
+            item = heapq.heappop(self.queue)
+            i = self.task_counter
+            self.currently_running[i] = copy.deepcopy(item)
+            self.task_counter += 1
+            self.server.queue_updated()
+            return (item, i)
 
     class ExecutionStatus(NamedTuple):
         status_str: Literal['success', 'error']
