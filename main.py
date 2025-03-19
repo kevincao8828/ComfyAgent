@@ -52,6 +52,9 @@ import itertools
 import shutil
 import threading
 import gc
+import uuid
+import aiohttp
+from aiohttp import web
 
 from comfy.cli_args import args
 import logging
@@ -60,7 +63,14 @@ if os.name == "nt":
     logging.getLogger("xformers").addFilter(lambda record: 'A matching Triton is not available' not in record.getMessage())
 
 if __name__ == "__main__":
-    if args.cuda_device is not None:
+    # Check for multi-GPU mode
+    if args.multi_gpu is not None:
+        # Multi-GPU mode is enabled
+        gpu_ids = [int(gpu_id.strip()) for gpu_id in args.multi_gpu.split(',')]
+        logging.info(f"Multi-GPU mode enabled with GPUs: {gpu_ids}")
+        # We'll apply the multi-GPU patch later after server initialization
+    elif args.cuda_device is not None:
+        # Single GPU mode with specific device
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
         logging.info("Set cuda device to: {}".format(args.cuda_device))
 
@@ -99,6 +109,7 @@ def prompt_worker(q, server):
     while True:
         timeout = 1000.0
         if need_gc:
+            current_time = time.perf_counter()
             timeout = max(gc_collect_interval - (current_time - last_gc_collect), 0.0)
 
         queue_item = q.get(timeout=timeout)
@@ -204,7 +215,15 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     server = server.PromptServer(loop)
-    q = execution.PromptQueue(server)
+    
+    # Initialize the server and queue
+    if args.multi_gpu is None:
+        # Standard single-GPU mode
+        q = execution.PromptQueue(server)
+    else:
+        # For multi-GPU mode, we'll create a dummy queue that won't be used
+        # The actual queues will be created by the multi-GPU patch
+        q = execution.PromptQueue(server)
 
     extra_model_paths_config_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "extra_model_paths.yaml")
     if os.path.isfile(extra_model_paths_config_path):
@@ -221,7 +240,21 @@ if __name__ == "__main__":
     server.add_routes()
     hijack_progress(server)
 
-    threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
+    if args.multi_gpu is not None:
+        # Apply multi-GPU patch
+        try:
+            import multi_gpu_patch
+            gpu_ids = [int(gpu_id.strip()) for gpu_id in args.multi_gpu.split(',')]
+            multi_gpu_patch.apply_multi_gpu_patch(server, gpu_ids)
+            logging.info(f"Multi-GPU mode enabled with GPUs: {gpu_ids}")
+        except Exception as e:
+            logging.error(f"Failed to initialize multi-GPU mode: {e}")
+            logging.error("Falling back to single-GPU mode")
+            # Start the standard worker thread
+            threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
+    else:
+        # Start the standard worker thread for single-GPU mode
+        threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
 
     if args.output_directory:
         output_dir = os.path.abspath(args.output_directory)
