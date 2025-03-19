@@ -79,6 +79,13 @@ from server import BinaryEventTypes
 from nodes import init_custom_nodes
 import comfy.model_management
 
+# Import multi-GPU support if available
+try:
+    import multi_gpu_worker
+    multi_gpu_available = True
+except ImportError:
+    multi_gpu_available = False
+
 def cuda_malloc_warning():
     device = comfy.model_management.get_torch_device()
     device_name = comfy.model_management.get_torch_device_name(device)
@@ -144,6 +151,28 @@ def prompt_worker(q, server):
                 comfy.model_management.soft_empty_cache()
                 last_gc_collect = current_time
                 need_gc = False
+
+def multi_gpu_worker_thread(gpu_manager):
+    """Thread that manages the multi-GPU worker processes"""
+    while True:
+        try:
+            # Process the queue and distribute tasks to available GPU workers
+            gpu_manager.process_queue()
+            
+            # Check for flags
+            flags = gpu_manager.prompt_queue.get_flags(reset=False)
+            if flags.get("unload_models", False) or flags.get("free_memory", False):
+                # Send command to all workers
+                command = {'type': 'unload_models' if flags.get("unload_models", False) else 'free_memory'}
+                gpu_manager.send_command_to_all_workers(command)
+                # Reset flags
+                gpu_manager.prompt_queue.get_flags(reset=True)
+            
+            # Sleep a bit to avoid busy waiting
+            time.sleep(0.01)
+        except Exception as e:
+            logging.error(f"Error in multi-GPU worker thread: {e}")
+            time.sleep(1)  # Sleep longer on error
 
 async def run(server, address='', port=8188, verbose=True, call_on_start=None):
     await asyncio.gather(server.start(address, port, verbose, call_on_start), server.publish_loop())
@@ -221,7 +250,25 @@ if __name__ == "__main__":
     server.add_routes()
     hijack_progress(server)
 
-    threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
+    # Check if multi-GPU mode is enabled
+    if args.multi_gpu and multi_gpu_available:
+        # Parse GPU IDs from comma-separated string
+        gpu_ids = [int(gpu_id.strip()) for gpu_id in args.multi_gpu.split(',')]
+        if len(gpu_ids) > 0:
+            logging.info(f"Starting in multi-GPU mode with GPUs: {gpu_ids}")
+            
+            # Initialize the multi-GPU manager
+            gpu_manager = multi_gpu_worker.MultiGPUManager(gpu_ids, server, q)
+            
+            # Start the multi-GPU worker thread
+            threading.Thread(target=multi_gpu_worker_thread, daemon=True, args=(gpu_manager,)).start()
+        else:
+            # Fall back to single GPU mode if no valid GPU IDs were provided
+            logging.warning("No valid GPU IDs provided for multi-GPU mode, falling back to single GPU mode")
+            threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
+    else:
+        # Start the regular single-GPU worker thread
+        threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
 
     if args.output_directory:
         output_dir = os.path.abspath(args.output_directory)
